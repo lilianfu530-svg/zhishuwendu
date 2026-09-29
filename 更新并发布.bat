@@ -34,9 +34,11 @@ if errorlevel 1 (
 git push origin main
 if errorlevel 1 (
     echo Git Push 失败，本地数据和页面已保留。
+    echo %date% %time% Git Push：失败>>"logs\update.log"
     goto failed
 )
-echo 已推送 GitHub，Cloudflare Pages 将自动部署。
+echo %date% %time% Git Push：成功>>"logs\update.log"
+echo 已推送 GitHub；Cloudflare Pages 绑定 main 后将自动部署。
 pause
 exit /b 0
 
