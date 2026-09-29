@@ -132,6 +132,7 @@ def read_dashboard_data(as_of_date: date | None = None) -> dict:
 HTML = r'''<!doctype html>
 <html lang="zh-CN">
 <head>
+<!-- 自动发布链路验证 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
