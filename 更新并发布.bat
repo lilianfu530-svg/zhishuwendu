@@ -4,24 +4,21 @@ setlocal
 cd /d "%~dp0"
 
 echo ================================
-echo 指数温度计自动更新
+echo Index temperature update
 echo ================================
 
 if not exist ".venv\Scripts\python.exe" (
-    echo 未找到项目 Python 环境：.venv\Scripts\python.exe
+    echo Python environment is missing: .venv\Scripts\python.exe
     goto failed
 )
 
-echo [1/2] 更新数据、指标和 HTML
+echo [1/2] Updating data and HTML
 ".venv\Scripts\python.exe" "scripts\main.py"
 if errorlevel 1 goto failed
 
-echo [2/2] 上传 GitHub
+echo [2/2] Publishing to GitHub
 git rev-parse --is-inside-work-tree >nul 2>&1
-if errorlevel 1 (
-    echo 尚未配置 Git 仓库，已完成本地更新。
-    goto failed
-)
+if errorlevel 1 goto failed
 git add -- index.html
 if errorlevel 1 goto failed
 git diff --cached --quiet -- index.html
@@ -29,20 +26,20 @@ if errorlevel 1 (
     git commit -m "Auto update index data"
     if errorlevel 1 goto failed
 ) else (
-    echo 页面无变化，无需新增提交。
+    echo No page changes; no new commit.
 )
 git push origin main
 if errorlevel 1 (
-    echo Git Push 失败，本地数据和页面已保留。
-    echo %date% %time% Git Push：失败>>"logs\update.log"
+    echo Git push failed. Local data and HTML remain available.
+    echo %date% %time% Git push failed>>"logs\update.log"
     goto failed
 )
-echo %date% %time% Git Push：成功>>"logs\update.log"
-echo 已推送 GitHub；Cloudflare Pages 绑定 main 后将自动部署。
+echo %date% %time% Git push succeeded>>"logs\update.log"
+echo GitHub is up to date. A connected Cloudflare Pages project will deploy automatically.
 pause
 exit /b 0
 
 :failed
-echo 更新或发布失败，请查看 logs\update.log 和上方错误。
+echo Update or publishing failed. Check logs\update.log and the error above.
 pause
 exit /b 1
