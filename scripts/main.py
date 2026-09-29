@@ -110,7 +110,8 @@ def fetch_stocks(connection, staged_indices: pd.DataFrame, target: pd.Timestamp)
     if wanted["last_date"].isna().any():
         raise RuntimeError("当前成分股缺少已初始化的股票历史")
     wanted["missing"] = wanted.apply(
-        lambda row: [day for day in market_days["HK" if row.market == "HK" else "Ashare"] if day > row.last_date],
+        lambda row: [day for day in market_days["HK" if row.market == "HK" else "Ashare"]
+                     if pd.Timestamp(day) > pd.Timestamp(row.last_date)],
         axis=1,
     )
     wanted = wanted[wanted.missing.map(bool)]
