@@ -18,6 +18,7 @@ import phase2_compute_models as models
 import update_20260928 as sources
 from phase2_fetch_stock_history import fetch_one
 from update_missing_20260924 import INDEX_FIELDS, STOCK_FIELDS
+from scheduled_run import trading_dates
 
 DB = ROOT / "data" / "market.duckdb"
 LOG = ROOT / "logs" / "update.log"
@@ -57,7 +58,13 @@ def fetch_indices(connection, registry: list[tuple], target: pd.Timestamp) -> pd
         if not source or not symbol or previous_close is None:
             raise RuntimeError(f"{code} 缺少锁定来源或前收盘")
         # 只请求正式库最大日期之后的小窗口，不重新下载历史。
-        expected = pd.date_range(start, target, freq="B").date.tolist()
+        expected = sorted(
+            day for year in range(start.year, target.year + 1)
+            for day in trading_dates(year, market)
+            if start.date() <= day <= target.date()
+        )
+        if not expected:
+            continue
         scale = sources.daily_scale(connection, "index_daily", "index_code=?", [code])
         try:
             frame = sources.fetch_index(code, source, symbol, expected, previous_close, scale)
