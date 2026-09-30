@@ -110,12 +110,15 @@ def fetch_stocks(connection, staged_indices: pd.DataFrame, target: pd.Timestamp)
         log("成分股行情：基准无新增交易日，复用正式库")
         return pd.DataFrame(columns=STOCK_FIELDS)
     latest = connection.execute(
-        "SELECT market,stock_code,MAX(date) last_date,MAX_BY(close,date) prior_close,MAX_BY(source,date) source "
+        'SELECT market,stock_code,MAX(date) last_date,MAX_BY(close,date) prior_close,MAX_BY(source,date) AS "source" '
         "FROM stock_daily GROUP BY 1,2"
     ).df()
     wanted = members.merge(latest, on=["market", "stock_code"], how="left", validate="one_to_one")
     if wanted["last_date"].isna().any():
-        raise RuntimeError("当前成分股缺少已初始化的股票历史")
+        uninitialized = wanted.loc[wanted["last_date"].isna(), ["market", "stock_code"]]
+        for row in uninitialized.itertuples(index=False):
+            log(f"{row.market}.{row.stock_code} 缺少已初始化的股票历史，来源待核实，保持 NA，跳过增量请求")
+        wanted = wanted[wanted["last_date"].notna()].copy()
     wanted["missing"] = wanted.apply(
         lambda row: [day for day in market_days["HK" if row.market == "HK" else "Ashare"]
                      if pd.Timestamp(day) > pd.Timestamp(row.last_date)],
@@ -166,6 +169,9 @@ def fetch_stocks(connection, staged_indices: pd.DataFrame, target: pd.Timestamp)
         if row.market == "HK" or row.source.startswith("腾讯财经") or row.source.startswith("新浪财经"):
             frame = fetch_one(row.market, row.stock_code, pd.Timestamp(min(row.missing)),
                               pd.Timestamp(max(row.missing)), row.prior_close)
+            if frame.empty:
+                log(f"{row.market}.{row.stock_code} 主源未返回新交易，保持 NA")
+                continue
             frame = frame[frame.date.dt.date.isin(row.missing)]
             if frame.empty:
                 log(f"{row.market}.{row.stock_code} 主源未返回新交易，保持 NA")
