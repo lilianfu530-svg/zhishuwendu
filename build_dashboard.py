@@ -30,7 +30,7 @@ def clean(value):
 
 
 def page_group(index_code: str, primary_source: str) -> str:
-    if index_code in {"000001", "000688"}:
+    if index_code in {"000001", "000688", "399006"}:
         return "broad"
     if "同花顺" in primary_source or index_code in {"930986", "931787"}:
         return "industry"
