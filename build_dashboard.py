@@ -14,6 +14,11 @@ DATABASE = ROOT / "data" / "market.duckdb"
 OUTPUT = ROOT / "output" / "index_temperature_dashboard.html"
 REGISTRY_STATUSES = ("active", "temperature_pending")
 VERSIONS = ("V1.0", "V1.1")
+PCT_CHANGE_POINTS_FROM = {
+    "000001": date(2026, 9, 23),
+    "000688": date(2026, 9, 23),
+    "000300": date(2026, 9, 23),
+}
 SCORES = (
     "RET20_score", "BIAS20_score", "RS20_score", "VolumeStrength_score",
     "BreadthMA20_score", "HLBreadth_score", "Sync_score",
@@ -27,6 +32,21 @@ def clean(value):
     if isinstance(value, float) and not math.isfinite(value):
         return None
     return value
+
+
+def normalize_pct_change_for_display(
+    index_code: str, trading_date: str, stored_value: float | None, source: str
+) -> float | None:
+    if stored_value is None:
+        return None
+    points_from = PCT_CHANGE_POINTS_FROM.get(index_code)
+    # 三个已迁移指数自首个同花顺入库日起使用百分点；此前保留旧小数口径。
+    if (points_from is not None and source == "同花顺金融数据服务"
+            and date.fromisoformat(trading_date) >= points_from):
+        return stored_value
+    if index_code == "930986":
+        return stored_value
+    return stored_value * 100
 
 
 def page_group(index_code: str, primary_source: str) -> str:
@@ -71,7 +91,7 @@ def read_dashboard_data(as_of_date: date | None = None) -> dict:
         fields = [
             "i.index_code", "i.date", "i.formula_version", "i.constituent_mode",
             "i.temperature", "i.temperature_change_1d", "i.temperature_change_5d",
-            "i.coverage_ratio", "p.close", "p.pct_change",
+            "i.coverage_ratio", "p.close", "p.pct_change", "p.source",
             *(f"i.{field}" for field in SCORES),
         ]
         date_filter = "" if as_of_date is None else "\n                  AND i.date <= ?"
@@ -104,8 +124,10 @@ def read_dashboard_data(as_of_date: date | None = None) -> dict:
         code = record.pop("index_code")
         version = record.pop("formula_version")
         record.pop("row_number")
-        if record["pct_change"] is not None and code != "930986":
-            record["pct_change"] = record["pct_change"] * 100
+        source = record.pop("source")
+        record["pct_change"] = normalize_pct_change_for_display(
+            code, record["date"], record["pct_change"], source
+        )
         data[version][code].append(record)
 
     for version in VERSIONS:
