@@ -35,7 +35,8 @@ if errorlevel 1 (
     goto failed
 )
 echo %date% %time% Git push succeeded>>"logs\update.log"
-echo GitHub is up to date. The connected Cloudflare site will deploy automatically.
+echo GitHub is up to date. GitHub Pages will publish automatically:
+echo https://lilianfu530-svg.github.io/zhishuwendu/
 if /I not "%~1"=="--scheduled" pause
 exit /b 0
 
