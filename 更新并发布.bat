@@ -3,6 +3,11 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
+set "HTTP_PROXY="
+set "HTTPS_PROXY="
+set "ALL_PROXY="
+set "NO_PROXY="
+
 echo ================================
 echo Index temperature update
 echo ================================
@@ -28,7 +33,7 @@ if errorlevel 1 (
 ) else (
     echo No page changes; no new commit.
 )
-git push origin main
+".venv\Scripts\python.exe" "proxy_env.py" push origin main
 if errorlevel 1 (
     echo Git push failed. Local data and HTML remain available.
     echo %date% %time% Git push failed>>"logs\update.log"
