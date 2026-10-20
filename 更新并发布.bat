@@ -2,6 +2,8 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+set "PYTHONIOENCODING=utf-8"
+set "PYTHONUTF8=1"
 
 set "HTTP_PROXY="
 set "HTTPS_PROXY="
@@ -22,18 +24,9 @@ echo [1/2] Updating data and HTML
 if errorlevel 1 goto failed
 
 echo [2/2] Publishing to GitHub
-git rev-parse --is-inside-work-tree >nul 2>&1
-if errorlevel 1 goto failed
-git add -- index.html
-if errorlevel 1 goto failed
-git diff --cached --quiet -- index.html
-if errorlevel 1 (
-    git commit -m "Auto update index data"
-    if errorlevel 1 goto failed
-) else (
-    echo No page changes; no new commit.
-)
-".venv\Scripts\python.exe" "proxy_env.py" push origin main
+".venv\Scripts\python.exe" "scripts\publish_update.py"
+if errorlevel 3 goto failed
+if errorlevel 2 goto pending
 if errorlevel 1 (
     echo Git push failed. Local data and HTML remain available.
     echo %date% %time% Git push failed>>"logs\update.log"
@@ -44,6 +37,12 @@ echo GitHub is up to date. GitHub Pages will publish automatically:
 echo https://lilianfu530-svg.github.io/zhishuwendu/
 if /I not "%~1"=="--scheduled" pause
 exit /b 0
+
+:pending
+echo Page published; source data is pending. The scheduled task will retry.
+echo %date% %time% Published with pending source data>>"logs\update.log"
+if /I not "%~1"=="--scheduled" pause
+exit /b 2
 
 :failed
 echo Update or publishing failed. Check logs\update.log and the error above.
