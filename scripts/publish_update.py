@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -13,6 +14,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 STATUS = ROOT / "logs" / "daily_update_status.json"
 PUBLISHED = ROOT / "logs" / "publish_status.json"
+ATTEMPTS = ROOT / "logs" / "git_publish_attempts.jsonl"
+
+
+def safe_output(value: str | bytes | None) -> str:
+    text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value or ""
+    text = re.sub(r"(?i)(https?://)[^/\s]*@", r"\1[已隐藏凭据]@", text)
+    text = re.sub(r"(?im)^.*(?:authorization:|x-api-key:).*$", "[已隐藏认证信息]", text)
+    for name, secret in os.environ.items():
+        if len(secret) >= 8 and re.search(r"TOKEN|SECRET|PASSWORD|API_KEY", name, re.I):
+            text = text.replace(secret, "[已隐藏凭据]")
+    return text.strip()
+
+
+def record_attempt(operation: str, returncode: int | str, stdout, stderr) -> None:
+    ATTEMPTS.parent.mkdir(exist_ok=True)
+    record = {"at": datetime.now().isoformat(timespec="seconds"), "operation": operation,
+              "returncode": returncode, "stdout": safe_output(stdout), "stderr": safe_output(stderr)}
+    with ATTEMPTS.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def git(*arguments: str, remote: bool = False) -> str:
@@ -20,10 +40,16 @@ def git(*arguments: str, remote: bool = False) -> str:
                 "-c", "http.lowSpeedTime=60"] if remote else ["git"]) + list(arguments)
     environment = os.environ.copy()
     environment.update(GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never")
-    result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", timeout=120, check=False, env=environment)
+    try:
+        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=120, check=False, env=environment)
+    except subprocess.TimeoutExpired as exc:
+        record_attempt(arguments[0], "timeout", exc.stdout, exc.stderr)
+        raise
+    if remote or result.returncode:
+        record_attempt(arguments[0], result.returncode, result.stdout, result.stderr)
     if result.returncode:
-        raise RuntimeError(f"git {arguments[0]} 失败，退出码 {result.returncode}")
+        raise RuntimeError(f"git {arguments[0]} 失败，退出码 {result.returncode}：{safe_output(result.stderr)}")
     return result.stdout.strip()
 
 

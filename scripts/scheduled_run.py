@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import msvcrt
 import os
 import subprocess
@@ -19,6 +20,38 @@ DATA = ROOT / "data"
 LOG = ROOT / "logs" / "scheduled_task.log"
 BAT = ROOT / "更新并发布.bat"
 PUBLISHED = ROOT / "logs" / "publish_status.json"
+STATUS = ROOT / "logs" / "daily_update_status.json"
+PAGE = ROOT / "index.html"
+
+
+def reusable_page(target: date, registry: list[tuple], targets: dict) -> tuple[bool, bool]:
+    if not STATUS.is_file() or not PAGE.is_file():
+        return False, False
+    status = json.loads(STATUS.read_text(encoding="utf-8"))
+    if status.get("state") != "complete" or status.get("target_date") != str(target):
+        return False, False
+    saved = {row["index_code"]: row for row in status["indices"]}
+    codes = {row[0] for row in registry}
+    if codes != set(saved) - {"000300"}:
+        return False, False
+    for code, market, source, symbol in registry:
+        row = saved[code]
+        if (row["primary_source"], row["source_symbol"], row["market"]) != (source, symbol, market):
+            return False, False
+        expected = str(targets[market])
+        if row["last_data_date"] != expected or any(row["versions"].get(version) != expected for version in ("V1.0", "V1.1")):
+            return False, False
+    digest = hashlib.sha256(PAGE.read_bytes()).hexdigest()
+    if digest != status["page_sha256"]:
+        return False, False
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
+                          text=True, encoding="utf-8", check=True).stdout.strip()
+    if PUBLISHED.is_file():
+        published = json.loads(PUBLISHED.read_text(encoding="utf-8"))
+        if (published["target_date"] == str(target) and published["data_state"] == "complete"
+                and published["page_sha256"] == digest and published["commit"] == head):
+            return True, True
+    return True, False
 
 
 def record(message: str) -> None:
@@ -68,9 +101,11 @@ def main() -> int:
     # 补跑只处理已经收盘的交易日；休市或次日登录仍可补发上一交易日。
     cutoff = now.date() if now.hour >= 19 else now.date() - timedelta(days=1)
     with duckdb.connect(str(DATA / "market.duckdb"), read_only=True) as connection:
-        markets = [row[0] for row in connection.execute(
-            "SELECT DISTINCT market FROM index_registry WHERE status IN ('active','temperature_pending')"
-        ).fetchall()]
+        registry = connection.execute(
+            "SELECT index_code,market,primary_source,source_symbol FROM index_registry "
+            "WHERE status IN ('active','temperature_pending') ORDER BY index_code"
+        ).fetchall()
+        markets = sorted({row[1] for row in registry})
     if not markets:
         raise RuntimeError("注册表没有需要更新的市场")
     targets = {}
@@ -84,14 +119,23 @@ def main() -> int:
         raise FileNotFoundError(BAT)
     environment = os.environ.copy()
     environment.update(INDEX_UPDATE_DATE=str(target), PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
-    record(f"各市场最近收盘交易日 {targets}，开始执行更新并发布.bat")
+    ready, published = reusable_page(target, registry, targets)
+    if published:
+        record(f"{target} 已完成更新并通过远端提交核验，本次重复触发直接复用，不重复采集或推送")
+        return 0
+    if ready:
+        record(f"{target} 页面已完成但远端尚未核验，仅补发 Git，复用正式库和现有页面")
+        command = [sys.executable, str(ROOT / "scripts" / "publish_update.py")]
+    else:
+        record(f"各市场最近收盘交易日 {targets}，开始执行更新并发布.bat")
+        command = ["cmd.exe", "/d", "/c", str(BAT), "--scheduled"]
     # 直接写日志，进程中断时仍能保留已经执行的阶段和异常现场。
     with LOG.open("a", encoding="utf-8") as stream:
         completed = subprocess.run(
-            ["cmd.exe", "/d", "/c", str(BAT), "--scheduled"], cwd=ROOT,
+            command, cwd=ROOT,
             stdout=stream, stderr=subprocess.STDOUT, env=environment, check=False,
         )
-    record(f"更新并发布.bat 结束，退出码 {completed.returncode}")
+    record(f"{'Git 补发' if ready else '更新并发布.bat'}结束，退出码 {completed.returncode}")
     if completed.returncode == 0:
         published = json.loads(PUBLISHED.read_text(encoding="utf-8"))
         if published["target_date"] != str(target) or published["data_state"] != "complete":
